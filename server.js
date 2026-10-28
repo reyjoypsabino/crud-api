@@ -46,7 +46,7 @@ app.post('/tasks', (req, res) => {
         done: false, 
     };
     tasks.push(newTask);
-    res.status(201).json(newTak);
+    res.status(201).json(newTask);
 });
 
 app.put('/tasks/:id', (req, res) => {
