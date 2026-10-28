@@ -6,6 +6,10 @@ const port = 3000;
 app.get('/', (req, res) => {
     res.send('Hello, Server!');
 });
+app.get('/health', (req, res) => {
+    re.json({status: "ok"});
+
+});
 
 let tasks = [
     {id: 1, title: "Learn Express", done: false},
@@ -38,9 +42,37 @@ app.post('/tasks', (req, res) => {
         done: false, 
     };
     tasks.push(newTask);
-    rs.status(201).json(newTak);
+    res.status(201).json(newTak);
 });
 
+app.put('/tasks/:id', (req, res) => {
+    const taskId = parseInt(req.params.id);
+    const task = tasks.find (t => t.id === taskId);
+
+    if (!task) {
+        return res.status(404).json({ error: `Task ${taskId} not found`});
+    }
+    if (Object.keys(req.body).length === 0) {
+        return res.status(400).json({ error: "Request body cannot be empty"})
+    }
+    const { title, done } = req.body;
+
+    if (title !==undefined) task.title = title;
+    if (done !==undefined) task.done = done;
+     
+    res.json(task);
+
+});
+app.delete('/tasks/:id', (req, res) => {
+    const taskId = parseInt(req.params.id);
+    const taskIndex = tasks.findIndex(t => t.id == taskId);
+
+    if (taskIndex == -1){
+        return res.status(404).json({error: `Task ${taskId} not found`});
+    }
+    tasks.splice(taskIndex, 1);
+    res.status(204).send();
+});
 
 
 app.listen(port, () =>{
