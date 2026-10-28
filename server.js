@@ -1,5 +1,6 @@
 const express = require ('express');
 const app = express();
+app.use(express.json());
 const port = 3000;
 
 app.get('/', (req, res) => {
@@ -24,6 +25,23 @@ app.get('/tasks/:id', (req, res) => {
     }
     res.json(task);
 });
+
+app.post('/tasks', (req, res) => {
+    const {title} = req.body;
+
+    if (!title || title.trim() === ""){
+        return res.status(400).json({ error: "Title is required"});
+    }
+    const newTask = {
+        id: nextId++,
+        title: title,
+        done: false, 
+    };
+    tasks.push(newTask);
+    rs.status(201).json(newTak);
+});
+
+
 
 app.listen(port, () =>{
     console.log(`Server running at http://localhost:${port}`);
