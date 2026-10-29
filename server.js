@@ -87,30 +87,45 @@ app.post('/tasks', (req, res) => {
 
 app.put('/tasks/:id', (req, res) => {
     const taskId = parseInt(req.params.id);
-    const task = tasks.find (t => t.id === taskId);
+    
+    const checkStmt = db.prepare('SELECT * FROM tasks WHERE id = ?');
+    const existingTask = checkStmt.get(taskId);
 
-    if (!task) {
-        return res.status(404).json({ error: `Task ${taskId} not found`});
+    if (!existingTask) {
+        return res.status(404).json({ error: `Task ${taskId} not found` });
     }
-    if (Object.keys(req.body).length === 0) {
-        return res.status(400).json({ error: "Request body cannot be empty"})
+
+    if (!req.body || Object.keys(req.body).length === 0) {
+        return res.status(400).json({ error: "Request body cannot be empty" });
     }
+
     const { title, done } = req.body;
+    const newTitle = title !== undefined ? title : existingTask.title;
+    const newDone = done !== undefined ? (done ? 1 : 0) : existingTask.done;
 
-    if (title !==undefined) task.title = title;
-    if (done !==undefined) task.done = done;
-     
-    res.json(task);
+    const updateStmt = db.prepare('UPDATE tasks SET title = ?, done = ? WHERE id = ?');
+    updateStmt.run(newTitle, newDone, taskId);
+
+    const updatedTask = checkStmt.get(taskId);
+    res.json({
+        ...updatedTask,
+        done: Boolean(updatedTask.done)
+    });
 
 });
 app.delete('/tasks/:id', (req, res) => {
     const taskId = parseInt(req.params.id);
-    const taskIndex = tasks.findIndex(t => t.id == taskId);
+    
+    const checkStmt = db.prepare('SELECT * FROM tasks WHERE id = ?');
+    const existingTask = checkStmt.get(taskId);
 
-    if (taskIndex == -1){
-        return res.status(404).json({error: `Task ${taskId} not found`});
+    if (!existingTask) {
+        return res.status(404).json({ error: `Task ${taskId} not found` });
     }
-    tasks.splice(taskIndex, 1);
+
+    const deleteStmt = db.prepare('DELETE FROM tasks WHERE id = ?');
+    deleteStmt.run(taskId);
+
     res.status(204).send();
 });
 
