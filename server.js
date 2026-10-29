@@ -1,4 +1,5 @@
 const express = require ('express');
+const database = require ('better-sqlite3');
 const swaggerUi = require ('swagger-ui-express');
 const swaggerDocument = require ( './openapi.json');
 
@@ -6,12 +7,31 @@ const app = express();
 app.use(express.json());
 const port = 3000;
 
+const db = new database('tasks.db');
+
+db.exec(`CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    done integer DEFAULT 0
+    )`);
+
+const countStmt = db.prepare('SELECT COUNT(*) AS count FROM tasks');
+const { count } = countStmt.get();
+
+if (count === 0) {
+    const insert = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)');
+    insert.run('Learn Express', 0);
+    insert.run('Build CRUD API', 0);
+    insert.run('Push to Github', 0);
+    console.log('Inserted 3 initial tasks into tasks.db');
+}
+
 app.use ('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 app.get('/', (req, res) => {
     res.send('Hello, Server!');
 });
 app.get('/health', (req, res) => {
-    re.json({status: "ok"});
+    res.json({status: "ok"});
 
 });
 
