@@ -118,4 +118,9 @@ Date: Wed, 28 Oct 2026 08:23:25 GMT
 
 {"id":1,"title":"Learn Express","done":true}
 📖 Swagger UI & Database Documentation
+
 Interactive Swagger documentation is available at http://localhost:3000/docs.
+![Swagger UI Screenshot](./swagger-screenshot.png)
+
+### Database Terminal Verification
+![PostgreSQL Database Screenshot](./db-screenshot.png)
