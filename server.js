@@ -6,6 +6,33 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerDocument = require('./openapi.json');
 
 const app = express();
+
+// ==========================================
+// STAGE 4: AUTH MIDDLEWARE
+// ==========================================
+async function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  if (!token || token.trim() === '') {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  const { data, error } = await supabase.auth.getUser(token);
+
+  if (error || !data?.user) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+
+  req.user = data.user;
+  req.token = token;
+  next();
+}
+
 app.use(express.json());
 
 const port = process.env.PORT || 3000;
@@ -80,7 +107,7 @@ app.get('/tasks/:id', async (req, res) => {
 });
 
 // POST /tasks - Create a new task
-app.post('/tasks', async (req, res) => {
+app.post('/tasks', authMiddleware, async (req, res) => {
   const { title } = req.body;
 
   if (!title || title.trim() === '') {
@@ -99,7 +126,7 @@ app.post('/tasks', async (req, res) => {
 });
 
 // PUT /tasks/:id - Update existing task
-app.put('/tasks/:id', async (req, res) => {
+  app.put('/tasks/:id', authMiddleware, async (req, res) => {
   const taskId = parseInt(req.params.id, 10);
 
   try {
@@ -129,7 +156,7 @@ app.put('/tasks/:id', async (req, res) => {
 });
 
 // DELETE /tasks/:id - Remove task
-app.delete('/tasks/:id', async (req, res) => {
+app.delete('/tasks/:id', authMiddleware, async (req, res) => {
   const taskId = parseInt(req.params.id, 10);
 
   try {
@@ -202,31 +229,24 @@ app.get('/public/info', (req, res) => {
     message: 'Welcome stranger! This info is public.'
   });
 });
-
-// GET /protected/profile - Verify JWT with Supabase and return user metadata
-app.get('/protected/profile', async (req, res) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Access token required' });
-  }
-
-  const token = authHeader.split(' ')[1];
-  if (!token || token.trim() === '') {
-    return res.status(401).json({ error: 'Access token required' });
-  }
-
-  const { data, error } = await supabase.auth.getUser(token);
-
-  if (error || !data?.user) {
-    return res.status(401).json({ error: 'Invalid or expired token' });
-  }
-
+// GET /protected/profile - Protected by authMiddleware
+app.get('/protected/profile', authMiddleware, (req, res) => {
   return res.status(200).json({
-    id: data.user.id,
-    email: data.user.email,
-    created_at: data.user.created_at
+    id: req.user.id,
+    email: req.user.email,
+    created_at: req.user.created_at
   });
+});
+
+// POST /auth/logout - End the user session
+app.post('/auth/logout', authMiddleware, async (req, res) => {
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  return res.status(200).json({ message: 'Logged out successfully' });
 });
 
 app.listen(port, () => {
