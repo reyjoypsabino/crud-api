@@ -192,6 +192,36 @@ app.post('/auth/login', async (req, res) => {
   });
 });
 
+// ==========================================
+// STAGE 2: PUBLIC & PROTECTED GATES
+// ==========================================
+
+// GET /public/info - Public endpoint (no auth required)
+app.get('/public/info', (req, res) => {
+  return res.status(200).json({
+    message: 'Welcome stranger! This info is public.'
+  });
+});
+
+// GET /protected/profile - Check that a Bearer token is present (verification comes in Stage 3)
+app.get('/protected/profile', (req, res) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  if (!token || token.trim() === '') {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  return res.status(200).json({
+    message: 'Token received (not verified yet)',
+    tokenPreview: `${token.slice(0, 10)}...`
+  });
+});
+
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port} and connected to Supabase`);
 });
