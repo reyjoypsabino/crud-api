@@ -188,3 +188,53 @@ Interactive Swagger documentation is available at `http://localhost:3000/docs`. 
 
 ### Database Terminal Verification
 ![PostgreSQL Database Screenshot](./db-screenshot.png)
+
+---
+
+## 🤖 AI vs me (Stage 7 — The AI Rematch)
+
+### My 4D Prompt Used to Generate `ai-version/`
+
+```text
+### 1. DELEGATION (Role & Boundaries)
+Act as a backend Node.js developer. Your task is to generate a complete, runnable Express REST API (`server.js`) and OpenAPI specification (`openapi.json`) implementing authentication and route protection. Do not generate `.env` files, database migrations, or Supabase dashboard configurations—I will manage environment secrets, Supabase setup, and security code review myself.
+
+### 2. DESCRIPTION (Technical Specifications)
+Build the backend in the **JavaScript lane (Node.js + Express)** using **Supabase Auth (`@supabase/supabase-js`)** as the Identity Provider and **PostgreSQL (`pg`)** for task persistence.
+
+Implement the following endpoints and exact HTTP status codes:
+- `POST /auth/signup` (Public): Accepts `{ email, password }`, validates missing fields (`400`), registers the user via `supabase.auth.signUp()`, and returns the created user (`201`).
+- `POST /auth/login` (Public): Accepts `{ email, password }`, validates missing fields (`400`), signs in via `supabase.auth.signInWithPassword()`, returns `401` on invalid credentials, and returns `{ access_token, refresh_token }` on success (`200`).
+- `POST /auth/logout` (Protected): Requires a valid Bearer JWT, ends the session via `supabase.auth.signOut()`, and returns confirmation (`200`) or `401` if unauthorized.
+- `GET /public/info` (Public): Returns a public welcome JSON message (`200`).
+- `GET /protected/profile` (Protected): Requires a valid Bearer JWT and returns the verified user's `id`, `email`, and `created_at` (`200`), or `401` if missing/invalid.
+- Task Routes (`/tasks` and `/tasks/:id`): Keep `GET /tasks` (`200`) and `GET /tasks/:id` (`200`/`404`) public. Protect `POST /tasks` (`201`/`400`/`401`), `PUT /tasks/:id` (`200`/`400`/`401`/`404`), and `DELETE /tasks/:id` (`204`/`401`/`404`) with JWT authentication.
+
+Middleware & Documentation Requirements:
+- Create a reusable Express middleware function that extracts the `Authorization: Bearer <token>` header and verifies the token against Supabase (`supabase.auth.getUser(token)`).
+- Configure Swagger UI at `/docs` with an OpenAPI `bearerAuth` HTTP security scheme so protected routes can be tested with a JWT.
+
+### 3. DISCERNMENT (Quality & Verification Criteria)
+Ensure the code satisfies these verification checks before finalizing:
+- Reject requests missing the `Authorization` header, lacking the `"Bearer "` prefix, or containing an empty/tampered token with `401 Unauthorized`.
+- Explicitly check both `error` and `!data?.user` from `supabase.auth.getUser(token)` rather than assuming a truthy response means valid authentication.
+- Keep async database and auth calls wrapped cleanly so invalid inputs return `400` or `401` instead of crashing the Express server.
+
+### 4. DILIGENCE (Security & Responsibility Guardrails)
+- Load `PORT`, `DATABASE_URL`, `SUPABASE_URL`, and `SUPABASE_KEY` strictly from `process.env` (`dotenv`). Never hardcode secrets or reference a `service_role` key.
+- Never log raw passwords, `access_token` strings, or authorization headers to the console.
+```
+
+### Code Review Findings (`git diff --no-index server.js ai-version/server.js`)
+
+1. **How did it handle token extraction?**
+   - Both implementations enforce `authHeader.startsWith('Bearer ')` so a raw `Authorization: <token>` header without the `"Bearer "` prefix is rejected with `401 Unauthorized` instead of slipping through or crashing. My version extracted the token with `authHeader.split(' ')[1]`, whereas the AI used `authHeader.slice(7).trim()` to slice off the exact 7-character `"Bearer "` prefix cleanly.
+2. **What security flaws might it have introduced?**
+   - None introduced in the auth flow: the AI explicitly verified both `error` and `!data?.user` from `supabase.auth.getUser(token)`, wrapped token verification in a `try / catch` block, loaded keys strictly from `.env` without referencing `service_role`, and never logged passwords or JWTs.
+3. **What did my prompt forget to specify—and what did the AI silently decide?**
+   - **Startup database initialization & root metadata:** My prompt did not mention `GET /` or creating the `tasks` table on boot, so the AI omitted `GET /` and assumed `tasks` already existed in PostgreSQL.
+   - **Module structure & config loading:** My `server.js` isolates Supabase in `supabase.js` (`require('./supabase')`) and imports `openapi.json` directly, whereas the AI initialized `createClient()` inline in `server.js` and read `openapi.json` via `fs.readFileSync`.
+   - **Parameter validation & middleware naming:** The AI silently added `Number.isInteger(Number(req.params.id))` validation (`400 Invalid task ID`), `typeof title !== 'string'` checks, a `!data?.session` guard on `/auth/login`, and named the guard `authenticateToken` instead of `authMiddleware`.
+
+### One Rematch (Prompt Iteration & Result)
+- **What changed in the rematch:** After updating the prompt to explicitly require `GET /` API metadata, automatic `CREATE TABLE IF NOT EXISTS tasks` initialization on startup, and integer `:id` validation, the regenerated `ai-version/server.js` now self-initializes its PostgreSQL schema and matches all routes in my hand-built API.
