@@ -7,11 +7,79 @@ const PROMPT_VERSION = 'triage-v1';
 const PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', `${PROMPT_VERSION}.md`);
 const SYSTEM_PROMPT = fs.readFileSync(PROMPT_PATH, 'utf8');
 
-function createClient() {
+function getTimeoutMs() {
+  const parsed = Number(process.env.LLM_TIMEOUT_MS);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15000;
+}
+
+function createClient(timeoutMs) {
   return new OpenAI({
     baseURL: process.env.LLM_BASE_URL,
     apiKey: process.env.LLM_API_KEY,
+    timeout: timeoutMs,
+    maxRetries: 0, // Disable hidden SDK retries so our policy controls every call
   });
+}
+
+function isTimeoutError(err) {
+  if (!err) return false;
+  return (
+    err.name === 'APIConnectionTimeoutError' ||
+    err.code === 'ETIMEDOUT' ||
+    err.code === 'ABORT_ERR' ||
+    /timed out|timeout/i.test(err.message || '')
+  );
+}
+
+function isTransientError(err) {
+  if (!err) return false;
+  if (isTimeoutError(err)) return true;
+
+  // Retry only rate limits (429), upstream server errors (5xx), or transient network errors.
+  // Never retry 400, 401, 403, or 404.
+  if (err.status === 429) return true;
+  if (typeof err.status === 'number' && err.status >= 500) return true;
+
+  const transientNetworkCodes = ['ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'];
+  return transientNetworkCodes.includes(err.code);
+}
+
+async function withTimeout(promiseFactory, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      promiseFactory(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const err = new Error(`LLM request timed out after ${timeoutMs}ms`);
+          err.code = 'ETIMEDOUT';
+          reject(err);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callWithRetry(fn, { maxRetries = 1, baseDelayMs = 400 } = {}) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt >= maxRetries || !isTransientError(err)) {
+        if (isTimeoutError(err)) {
+          err.code = 'LLM_TIMEOUT';
+        }
+        throw err;
+      }
+
+      attempt += 1;
+      const delayMs = baseDelayMs * Math.pow(2, attempt - 1);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
 }
 
 function stripMarkdownFences(rawText) {
@@ -72,7 +140,10 @@ function buildRepairPrompt(invalidOutput, validationError) {
 }
 
 async function classifySupportMessage(text, options = {}) {
-  const client = options.client || createClient();
+  const timeoutMs = options.timeoutMs || getTimeoutMs();
+  const maxRetries = options.maxRetries ?? 1;
+  const baseDelayMs = options.baseDelayMs ?? 400;
+  const client = options.client || createClient(timeoutMs);
   const model = options.model || process.env.LLM_MODEL;
 
   const baseMessages = [
@@ -80,12 +151,20 @@ async function classifySupportMessage(text, options = {}) {
     { role: 'user', content: `<support_message>\n${text}\n</support_message>` },
   ];
 
-  // Attempt 1: Initial model call
-  const firstResponse = await client.chat.completions.create({
-    model,
-    temperature: 0,
-    messages: baseMessages,
-  });
+  // Attempt 1: Initial model call with timeout and transient-only retry
+  const firstResponse = await callWithRetry(
+    () =>
+      withTimeout(
+        () =>
+          client.chat.completions.create({
+            model,
+            temperature: 0,
+            messages: baseMessages,
+          }),
+        timeoutMs
+      ),
+    { maxRetries, baseDelayMs }
+  );
 
   const firstRaw = firstResponse.choices?.[0]?.message?.content ?? '';
   const firstCheck = parseAndValidateModelOutput(firstRaw);
@@ -98,16 +177,24 @@ async function classifySupportMessage(text, options = {}) {
     };
   }
 
-  // Attempt 2 (bounded to 1 repair): Hand the model its own validation error
-  const repairResponse = await client.chat.completions.create({
-    model,
-    temperature: 0,
-    messages: [
-      ...baseMessages,
-      { role: 'assistant', content: firstRaw },
-      { role: 'user', content: buildRepairPrompt(firstRaw, firstCheck.error) },
-    ],
-  });
+  // Attempt 2 (bounded to 1 schema repair): Hand the model its own validation error
+  const repairResponse = await callWithRetry(
+    () =>
+      withTimeout(
+        () =>
+          client.chat.completions.create({
+            model,
+            temperature: 0,
+            messages: [
+              ...baseMessages,
+              { role: 'assistant', content: firstRaw },
+              { role: 'user', content: buildRepairPrompt(firstRaw, firstCheck.error) },
+            ],
+          }),
+        timeoutMs
+      ),
+    { maxRetries, baseDelayMs }
+  );
 
   const repairRaw = repairResponse.choices?.[0]?.message?.content ?? '';
   const repairCheck = parseAndValidateModelOutput(repairRaw);
@@ -129,4 +216,6 @@ module.exports = {
   PROMPT_VERSION,
   classifySupportMessage,
   parseAndValidateModelOutput,
+  isTransientError,
+  isTimeoutError,
 };

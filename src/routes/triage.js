@@ -59,6 +59,7 @@ router.post('/triage', async (req, res) => {
   }
 
   // 3. Live model call
+// 3. Live model call
   try {
     const { result } = await classifySupportMessage(text);
     return res.status(200).json(result);
@@ -66,6 +67,13 @@ router.post('/triage', async (req, res) => {
     if (err.code === 'INVALID_MODEL_OUTPUT') {
       return res.status(422).json({
         error: 'Model returned invalid output that failed schema validation.',
+      });
+    }
+
+    if (err.code === 'LLM_TIMEOUT') {
+      console.error('[triage] Upstream LLM timeout:', err.message);
+      return res.status(504).json({
+        error: 'Upstream LLM provider timed out.',
       });
     }
 
