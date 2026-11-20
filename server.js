@@ -1,11 +1,13 @@
 require('dotenv').config();
 const express = require('express');
+const triageRouter = require('./src/routes/triage');
 const supabase = require('./supabase');
 const { Pool } = require('pg');
 const swaggerUi = require('swagger-ui-express');
 const swaggerDocument = require('./openapi.json');
 
 const app = express();
+
 
 // ==========================================
 // STAGE 4: AUTH MIDDLEWARE
@@ -34,6 +36,8 @@ async function authMiddleware(req, res, next) {
 }
 
 app.use(express.json());
+
+app.use(triageRouter);
 
 const port = process.env.PORT || 3000;
 
