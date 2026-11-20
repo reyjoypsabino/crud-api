@@ -59,30 +59,69 @@ function parseAndValidateModelOutput(rawText) {
   };
 }
 
-async function classifySupportMessage(text) {
-  const client = createClient();
+function buildRepairPrompt(invalidOutput, validationError) {
+  return [
+    'Your previous response failed JSON/schema validation.',
+    `Validation error: ${validationError}`,
+    'Previous invalid response:',
+    invalidOutput || '(empty response)',
+    '',
+    'Fix the response and return ONLY valid JSON matching this exact schema (no markdown fences, no extra text):',
+    '{"category":"billing|bug|feature|other","urgency":"low|normal|high","confidence":0.0,"reason":"one short sentence"}',
+  ].join('\n');
+}
 
-  const response = await client.chat.completions.create({
-    model: process.env.LLM_MODEL,
+async function classifySupportMessage(text, options = {}) {
+  const client = options.client || createClient();
+  const model = options.model || process.env.LLM_MODEL;
+
+  const baseMessages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: `<support_message>\n${text}\n</support_message>` },
+  ];
+
+  // Attempt 1: Initial model call
+  const firstResponse = await client.chat.completions.create({
+    model,
+    temperature: 0,
+    messages: baseMessages,
+  });
+
+  const firstRaw = firstResponse.choices?.[0]?.message?.content ?? '';
+  const firstCheck = parseAndValidateModelOutput(firstRaw);
+
+  if (firstCheck.ok) {
+    return {
+      result: firstCheck.data,
+      promptVersion: PROMPT_VERSION,
+      repaired: false,
+    };
+  }
+
+  // Attempt 2 (bounded to 1 repair): Hand the model its own validation error
+  const repairResponse = await client.chat.completions.create({
+    model,
     temperature: 0,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `<support_message>\n${text}\n</support_message>` },
+      ...baseMessages,
+      { role: 'assistant', content: firstRaw },
+      { role: 'user', content: buildRepairPrompt(firstRaw, firstCheck.error) },
     ],
   });
 
-  const rawContent = response.choices?.[0]?.message?.content ?? '';
-  const checked = parseAndValidateModelOutput(rawContent);
+  const repairRaw = repairResponse.choices?.[0]?.message?.content ?? '';
+  const repairCheck = parseAndValidateModelOutput(repairRaw);
 
-  if (!checked.ok) {
-    const err = new Error(checked.error);
+  if (!repairCheck.ok) {
+    const err = new Error(`Model output invalid after repair: ${repairCheck.error}`);
     err.code = 'INVALID_MODEL_OUTPUT';
     throw err;
   }
 
   return {
-    result: checked.data,
+    result: repairCheck.data,
     promptVersion: PROMPT_VERSION,
+    repaired: true,
   };
 }
 
