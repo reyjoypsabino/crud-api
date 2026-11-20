@@ -1,5 +1,6 @@
 const express = require('express');
 const { TriageInputSchema, TriageOutputSchema } = require('../llm/schema');
+const { classifySupportMessage } = require('../llm/triage');
 
 const router = express.Router();
 
@@ -57,9 +58,22 @@ router.post('/triage', async (req, res) => {
     return res.status(200).json(stubResult);
   }
 
-  return res.status(501).json({
-    error: 'Live LLM mode not wired yet. Set LLM_STUB=true for Stage 1.',
-  });
+  // 3. Live model call
+  try {
+    const { result } = await classifySupportMessage(text);
+    return res.status(200).json(result);
+  } catch (err) {
+    if (err.code === 'INVALID_MODEL_OUTPUT') {
+      return res.status(422).json({
+        error: 'Model returned invalid output that failed schema validation.',
+      });
+    }
+
+    console.error('[triage] Upstream LLM error:', err.message);
+    return res.status(502).json({
+      error: 'Upstream LLM provider request failed.',
+    });
+  }
 });
 
 module.exports = router;
